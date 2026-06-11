@@ -1,11 +1,15 @@
 {
-  "name": "bottele",
-  "version": "0.0.0",
+  "name": "shoptelgram",
+  "version": "1.0.0",
+  "description": "A complete Telegram shop bot running on Cloudflare Workers + KV.",
   "private": true,
+  "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "start": "wrangler dev"
+    "start": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "kv:create": "wrangler kv namespace create SHOP"
   },
   "devDependencies": {
     "wrangler": "^4.98.0"

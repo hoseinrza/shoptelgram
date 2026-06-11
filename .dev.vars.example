@@ -1,0 +1,17 @@
+# Local development secrets for `wrangler dev`.
+# Copy this file to `.dev.vars` and fill in real values.
+# `.dev.vars` is git-ignored — never commit real tokens.
+
+# Bot token from @BotFather
+BOT_TOKEN="123456:ABC-DEF_your_token_here"
+
+# Any long random string. Secures the webhook and the /setup endpoint.
+WEBHOOK_SECRET="change-me-to-a-long-random-string"
+
+# Comma-separated Telegram numeric user IDs that get admin access.
+# Find yours by messaging @userinfobot on Telegram.
+ADMIN_IDS="111111111,222222222"
+
+# Optional display settings
+SHOP_NAME="فروشگاه من"
+SUPPORT_CONTACT="@your_support"

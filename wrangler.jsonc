@@ -1,9 +1,37 @@
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bottele",
   "main": "src/worker.js",
   "workers_dev": true,
   "preview_urls": false,
   "compatibility_date": "2026-06-05",
+
+  // ----------------------------------------------------------------------
+  // KV namespace for all bot data (products, orders, users, carts, state).
+  // Create it once with:
+  //   npx wrangler kv namespace create SHOP
+  // then paste the printed "id" below (replace REPLACE_WITH_YOUR_KV_ID).
+  // For local dev you can also run:
+  //   npx wrangler kv namespace create SHOP --preview
+  // and add the printed id as "preview_id".
+  // ----------------------------------------------------------------------
+  "kv_namespaces": [
+    {
+      "binding": "SHOP",
+      "id": "REPLACE_WITH_YOUR_KV_ID"
+    }
+  ],
+
+  // Non-secret configuration. Override per-environment as needed.
+  // Secrets (BOT_TOKEN, WEBHOOK_SECRET) must NOT go here — set them with
+  //   npx wrangler secret put BOT_TOKEN
+  //   npx wrangler secret put WEBHOOK_SECRET
+  "vars": {
+    "SHOP_NAME": "فروشگاه من",
+    "ADMIN_IDS": "",
+    "SUPPORT_CONTACT": ""
+  },
+
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
