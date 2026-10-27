@@ -24,6 +24,7 @@
 
 import { Telegram } from './telegram.js';
 import { handleUpdate } from './router.js';
+import { handleAdminRoute } from './admin/api.js';
 import { secureCompare, isValidWebhookSecret } from './validate.js';
 
 const COMMANDS = [
@@ -42,6 +43,9 @@ export default {
     try {
       if (request.method === 'POST' && pathname === '/webhook') {
         return await onWebhook(request, env, ctx);
+      }
+      if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+        return await handleAdminRoute(request, env, pathname);
       }
       if (pathname === '/setup') return await adminEndpoint(request, env, onSetup);
       if (pathname === '/unset') return await adminEndpoint(request, env, onUnset);
@@ -76,6 +80,9 @@ export function configIssues(env) {
   if (!env.DB) issues.push({ key: 'DB', problem: 'missing D1 binding' });
   if (!String(env.ADMIN_IDS || '').trim()) {
     issues.push({ key: 'ADMIN_IDS', problem: 'empty — nobody can manage the shop' });
+  }
+  if (!env.ADMIN_PANEL_PASSWORD) {
+    issues.push({ key: 'ADMIN_PANEL_PASSWORD', problem: 'empty — the web panel at /admin stays disabled' });
   }
   return issues;
 }

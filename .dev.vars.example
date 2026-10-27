@@ -14,6 +14,10 @@ WEBHOOK_SECRET="change-me-to-a-long-random-string"
 # Find yours by messaging @userinfobot on Telegram.
 ADMIN_IDS="111111111,222222222"
 
+# Password for the web admin panel at /admin (leave empty to disable the panel).
+# Choose something long and random — it also signs the panel session cookies.
+ADMIN_PANEL_PASSWORD="change-me-long-random-password"
+
 # Optional display settings
 SHOP_NAME="فروشگاه من"
 SUPPORT_CONTACT="@your_support"

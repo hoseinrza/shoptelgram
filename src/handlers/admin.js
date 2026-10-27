@@ -7,6 +7,7 @@
 import { t, ORDER_STATUS } from '../messages.js';
 import * as kb from '../keyboards.js';
 import { LIMITS, parseAmount, cleanText } from '../validate.js';
+import { runBroadcastChunk } from '../broadcast.js';
 
 export async function showAdminPanel(ctx, msg) {
   if (!ctx.isAdmin) return ctx.tg.answerCallbackQuery(ctx.queryId, { text: t.notAdmin, show_alert: true });
@@ -205,12 +206,9 @@ export async function startBroadcast(ctx, query, msg) {
 }
 
 /**
- * The admin's broadcast text is sent verbatim (no HTML parsing) in chunks of
- * LIMITS.broadcastChunk recipients — this keeps each webhook invocation well
- * inside Workers' subrequest limits and Telegram's rate limits. Progress is
- * persisted in D1, so the rest is sent by tapping «ادامه ارسال» (or by the
- * same callback id) until the broadcast is done. Chunk claiming is guarded by
- * a compare-and-set on next_offset, so double-taps never double-send.
+ * The admin's broadcast text is sent verbatim (no HTML parsing) through the
+ * shared chunked engine in src/broadcast.js — safe against double-taps and
+ * resumable until done.
  */
 export async function handleBroadcastInput(ctx, _state, text) {
   if (!ctx.isAdmin) return;
@@ -224,7 +222,7 @@ export async function handleBroadcastInput(ctx, _state, text) {
     return ctx.send(ctx.userId, t.broadcastDone(0, 0), kb.adminMenu());
   }
   const b = await ctx.store.createBroadcast(ctx.userId, body, total);
-  return runBroadcastChunk(ctx, b);
+  return continueChunked(ctx.store, ctx.tg, b, (msg, keyboard) => ctx.send(ctx.userId, msg, keyboard));
 }
 
 /** Continue/callback entry: adm:bcgo:<id> */
@@ -235,40 +233,17 @@ export async function continueBroadcast(ctx, query, msg, broadcastId) {
   if (!b || b.status === 'done') {
     return showAdminPanel(ctx, msg);
   }
-  return runBroadcastChunk(ctx, b);
+  return continueChunked(ctx.store, ctx.tg, b, (msg2, keyboard) => ctx.send(ctx.userId, msg2, keyboard));
 }
 
-async function runBroadcastChunk(ctx, b) {
-  // Atomically claim the next chunk: only one caller can advance the offset.
-  const start = b.nextOffset;
-  const next = Math.min(start + LIMITS.broadcastChunk, b.total);
-  const claimed = await ctx.store.claimBroadcastChunk(b.id, start, next);
-  if (!claimed) return; // another tap already claimed this chunk — do nothing
-
-  const ids = await ctx.store.usersPage(start, LIMITS.broadcastChunk);
-  let okCount = 0;
-  let failCount = 0;
-  for (const id of ids) {
-    try {
-      await ctx.tg.sendPlainMessage(id, b.text);
-      okCount++;
-    } catch {
-      // 403 = blocked bot, timeouts, transient Telegram errors — count and move on.
-      failCount++;
-    }
-  }
-
-  const done = next >= b.total;
-  const nb = await ctx.store.updateBroadcast(b.id, {
-    sentDelta: okCount,
-    failedDelta: failCount,
-    status: done ? 'done' : 'running',
-  });
-
+async function continueChunked(store, tg, b, send) {
+  const res = await runBroadcastChunk(store, tg, b);
+  if (!res) return; // chunk already claimed by another tap — nothing to do
+  const { done, broadcast } = res;
   if (done) {
-    return ctx.send(ctx.userId, t.broadcastDone(nb.sent, nb.failed), kb.adminMenu());
+    return send(t.broadcastDone(broadcast.sent, broadcast.failed), kb.adminMenu());
   }
-  return ctx.send(ctx.userId, t.broadcastProgress(nb), kb.broadcastContinueMenu(nb.id));
+  return send(t.broadcastProgress(broadcast), kb.broadcastContinueMenu(broadcast.id));
 }
 
 /** Send a message to every configured admin (used for new-order alerts). */

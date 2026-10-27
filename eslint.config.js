@@ -32,6 +32,8 @@ export default [
         Response: 'readonly',
         AbortSignal: 'readonly',
         TextEncoder: 'readonly',
+        btoa: 'readonly',
+        atob: 'readonly',
         setTimeout: 'readonly',
       },
     },
