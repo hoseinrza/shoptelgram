@@ -7,13 +7,31 @@
   "compatibility_date": "2026-06-05",
 
   // ----------------------------------------------------------------------
-  // KV namespace for all bot data (products, orders, users, carts, state).
+  // D1 (SQLite) database — the single source of truth for all bot data
+  // (products, orders, users, carts, states, broadcasts).
+  //
   // Create it once with:
-  //   npx wrangler kv namespace create SHOP
-  // then paste the printed "id" below (replace REPLACE_WITH_YOUR_KV_ID).
-  // For local dev you can also run:
-  //   npx wrangler kv namespace create SHOP --preview
-  // and add the printed id as "preview_id".
+  //   npx wrangler d1 create shoptelgram
+  // then paste the printed "database_id" below (replace REPLACE_WITH_YOUR_D1_ID)
+  // and apply the schema:
+  //   npm run d1:migrate        (remote)  |  npm run d1:migrate:local  (local dev)
+  //
+  // Migrations live in ./migrations and are applied with wrangler d1 migrations.
+  // ----------------------------------------------------------------------
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shoptelgram",
+      "database_id": "REPLACE_WITH_YOUR_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // ----------------------------------------------------------------------
+  // LEGACY: KV namespace used by the previous version of the bot.
+  // Only needed while running the one-time KV -> D1 data migration
+  // (scripts/migrate-kv-to-d1.mjs). After migrating you can delete this
+  // block and the namespace itself. New deployments don't need it.
   // ----------------------------------------------------------------------
   "kv_namespaces": [
     {
@@ -26,6 +44,8 @@
   // Secrets (BOT_TOKEN, WEBHOOK_SECRET) must NOT go here — set them with
   //   npx wrangler secret put BOT_TOKEN
   //   npx wrangler secret put WEBHOOK_SECRET
+  // WEBHOOK_SECRET charset: Telegram allows only [A-Za-z0-9_-], max 256 chars
+  // (e.g. generate with: openssl rand -hex 32).
   "vars": {
     "SHOP_NAME": "فروشگاه من",
     "ADMIN_IDS": "",

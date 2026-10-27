@@ -5,7 +5,9 @@
 # Bot token from @BotFather
 BOT_TOKEN="123456:ABC-DEF_your_token_here"
 
-# Any long random string. Secures the webhook and the /setup endpoint.
+# Any long random string using ONLY [A-Za-z0-9_-] (max 256 chars).
+# Telegram enforces this charset for webhook secret tokens.
+# Generate one with: openssl rand -hex 32
 WEBHOOK_SECRET="change-me-to-a-long-random-string"
 
 # Comma-separated Telegram numeric user IDs that get admin access.
@@ -15,3 +17,6 @@ ADMIN_IDS="111111111,222222222"
 # Optional display settings
 SHOP_NAME="فروشگاه من"
 SUPPORT_CONTACT="@your_support"
+
+# Local D1 note: `wrangler dev` creates a local SQLite database automatically.
+# Apply the schema to it once with:  npm run d1:migrate:local

@@ -1,10 +1,12 @@
 /**
  * Admin flows: product CRUD, order management, stats, broadcast.
- * Every entry point re-checks ctx.isAdmin so non-admins can never reach them.
+ * Every entry point re-checks ctx.isAdmin, so non-admins can never reach them
+ * even if a crafted callback arrives.
  */
 
-import { t, money, ORDER_STATUS } from '../messages.js';
+import { t, ORDER_STATUS } from '../messages.js';
 import * as kb from '../keyboards.js';
+import { LIMITS, parseAmount, cleanText } from '../validate.js';
 
 export async function showAdminPanel(ctx, msg) {
   if (!ctx.isAdmin) return ctx.tg.answerCallbackQuery(ctx.queryId, { text: t.notAdmin, show_alert: true });
@@ -26,40 +28,57 @@ export async function handleAddProductInput(ctx, state, message) {
   const data = state.data;
   const text = message.text ? message.text.trim() : '';
   const dash = text === '-';
+  const askAgain = (prompt) => ctx.send(chatId, prompt, kb.cancelMenu());
 
   switch (state.step) {
-    case 'title':
-      if (!text) return ctx.send(chatId, t.askProdTitle, kb.cancelMenu());
-      data.title = text;
+    case 'title': {
+      const title = cleanText(text, LIMITS.title);
+      if (!title) return askAgain(t.askProdTitle);
+      data.title = title;
       return advance(ctx, state, 'desc', t.askProdDesc);
+    }
 
-    case 'desc':
-      data.description = dash ? '' : text;
+    case 'desc': {
+      if (!dash) {
+        const description = cleanText(text, LIMITS.description);
+        if (!description) return askAgain(t.textTooLong + '\n' + t.askProdDesc);
+        data.description = description;
+      } else {
+        data.description = '';
+      }
       return advance(ctx, state, 'price', t.askProdPrice);
+    }
 
     case 'price': {
-      const price = parseAmount(text);
-      if (price === null) return ctx.send(chatId, t.invalidNumber, kb.cancelMenu());
+      const price = parseAmount(text, LIMITS.price);
+      if (price === null) return askAgain(t.invalidNumber);
       data.price = price;
       return advance(ctx, state, 'stock', t.askProdStock);
     }
 
     case 'stock': {
-      const stock = parseAmount(text);
-      if (stock === null) return ctx.send(chatId, t.invalidNumber, kb.cancelMenu());
+      const stock = parseAmount(text, LIMITS.stock);
+      if (stock === null) return askAgain(t.invalidNumber);
       data.stock = stock;
       return advance(ctx, state, 'category', t.askProdCategory);
     }
 
-    case 'category':
-      data.category = dash ? '' : text;
+    case 'category': {
+      if (!dash) {
+        const category = cleanText(text, LIMITS.category);
+        if (!category) return askAgain(t.textTooLong + '\n' + t.askProdCategory);
+        data.category = category;
+      } else {
+        data.category = '';
+      }
       return advance(ctx, state, 'photo', t.askProdPhoto);
+    }
 
     case 'photo': {
       if (message.photo && message.photo.length) {
         // Largest available size is the last entry.
         data.photo = message.photo[message.photo.length - 1].file_id;
-      } else if (!dash && text && /^https?:\/\//.test(text)) {
+      } else if (!dash && text && /^https?:\/\//.test(text) && text.length <= 400) {
         data.photo = text;
       } else {
         data.photo = null;
@@ -71,13 +90,14 @@ export async function handleAddProductInput(ctx, state, message) {
   }
 }
 
-export async function showManageProducts(ctx, msg) {
+export async function showManageProducts(ctx, msg, page = 1) {
   if (!ctx.isAdmin) return;
-  const products = await ctx.store.listProducts();
-  if (products.length === 0) {
+  const { items, page: p, pages } = await ctx.store.listProductsPage({ page });
+  if (items.length === 0) {
     return ctx.replace(msg, { text: t.noProducts, keyboard: kb.adminMenu() });
   }
-  return ctx.replace(msg, { text: t.manageHeader, keyboard: kb.adminProductsMenu(products) });
+  const header = pages > 1 ? t.manageHeader + '\n' + t.pageInfo(p, pages) : t.manageHeader;
+  return ctx.replace(msg, { text: header, keyboard: kb.adminProductsMenu(items, p, pages) });
 }
 
 export async function showAdminProduct(ctx, msg, productId) {
@@ -116,23 +136,28 @@ export async function startEditField(ctx, query, msg, productId, field) {
 
 export async function handleEditProductInput(ctx, state, text) {
   if (!ctx.isAdmin) return;
-  const value = parseAmount(text);
+  const max = state.step === 'price' ? LIMITS.price : LIMITS.stock;
+  const value = parseAmount(text, max);
   if (value === null) return ctx.send(ctx.userId, t.invalidNumber, kb.cancelMenu());
   const patch = state.step === 'price' ? { price: value } : { stock: value };
-  await ctx.store.updateProduct(state.data.productId, patch);
+  const p = await ctx.store.updateProduct(state.data.productId, patch);
   await ctx.store.clearState(ctx.userId);
-  const p = await ctx.store.getProduct(state.data.productId);
+  if (!p) {
+    return ctx.send(ctx.userId, t.productMissing, kb.adminMenu());
+  }
   return ctx.send(ctx.userId, t.updated + '\n\n' + t.productAdminView(p), kb.adminProductMenu(p));
 }
 
 // ---- order management ----------------------------------------------------
-export async function showAdminOrders(ctx, msg) {
+export async function showAdminOrders(ctx, msg, page = 1) {
   if (!ctx.isAdmin) return;
-  const orders = await ctx.store.listOrders();
-  if (orders.length === 0) {
+  const { items, page: p, pages, total } = await ctx.store.listOrdersPage({ page });
+  if (items.length === 0) {
     return ctx.replace(msg, { text: t.adminNoOrders, keyboard: kb.adminMenu() });
   }
-  return ctx.replace(msg, { text: t.adminOrdersHeader, keyboard: kb.adminOrdersMenu(orders) });
+  const header = pages > 1 ? t.adminOrdersHeader + t.pageInfo(p, pages) : t.adminOrdersHeader;
+  void total;
+  return ctx.replace(msg, { text: header, keyboard: kb.adminOrdersMenu(items, p, pages) });
 }
 
 export async function showAdminOrder(ctx, msg, orderId) {
@@ -147,16 +172,21 @@ export async function showAdminOrder(ctx, msg, orderId) {
 
 export async function setOrderStatus(ctx, query, msg, orderId, status) {
   if (!ctx.isAdmin) return;
-  const o = await ctx.store.updateOrderStatus(orderId, status);
+  const res = await ctx.store.setOrderStatus(orderId, status);
+  if (!res.ok) {
+    // Missing order, unknown status or an illegal transition — never applied.
+    return ctx.tg.answerCallbackQuery(query.id, { text: t.invalidTransition, show_alert: true });
+  }
   await ctx.tg.answerCallbackQuery(query.id, { text: t.updated });
   // Let the customer know their order status changed.
-  if (o) {
-    ctx.waitUntil(
-      ctx.tg
-        .sendMessage(o.userId, `وضعیت سفارش #${o.id} به‌روزرسانی شد:\n${ORDER_STATUS[status]}`)
-        .catch(() => {}),
-    );
-  }
+  ctx.waitUntil(
+    ctx.tg
+      .sendMessage(
+        res.order.userId,
+        `وضعیت سفارش #${res.order.id} به‌روزرسانی شد:\n${ORDER_STATUS[res.order.status]}`,
+      )
+      .catch(() => {}),
+  );
   return showAdminOrder(ctx, msg, orderId);
 }
 
@@ -174,28 +204,78 @@ export async function startBroadcast(ctx, query, msg) {
   return ctx.replace(msg, { text: t.askBroadcast, keyboard: kb.cancelMenu() });
 }
 
+/**
+ * The admin's broadcast text is sent verbatim (no HTML parsing) in chunks of
+ * LIMITS.broadcastChunk recipients — this keeps each webhook invocation well
+ * inside Workers' subrequest limits and Telegram's rate limits. Progress is
+ * persisted in D1, so the rest is sent by tapping «ادامه ارسال» (or by the
+ * same callback id) until the broadcast is done. Chunk claiming is guarded by
+ * a compare-and-set on next_offset, so double-taps never double-send.
+ */
 export async function handleBroadcastInput(ctx, _state, text) {
   if (!ctx.isAdmin) return;
+  const body = cleanText(text, LIMITS.broadcast);
+  if (!body) {
+    return ctx.send(ctx.userId, t.textTooLong + '\n' + t.askBroadcast, kb.cancelMenu());
+  }
   await ctx.store.clearState(ctx.userId);
-  const users = await ctx.store.listUsers();
-  let ok = 0;
-  let fail = 0;
-  for (const u of users) {
+  const total = await ctx.store.countUsers();
+  if (total === 0) {
+    return ctx.send(ctx.userId, t.broadcastDone(0, 0), kb.adminMenu());
+  }
+  const b = await ctx.store.createBroadcast(ctx.userId, body, total);
+  return runBroadcastChunk(ctx, b);
+}
+
+/** Continue/callback entry: adm:bcgo:<id> */
+export async function continueBroadcast(ctx, query, msg, broadcastId) {
+  if (!ctx.isAdmin) return;
+  await ctx.tg.answerCallbackQuery(query.id, { text: t.btnBroadcastContinue });
+  const b = await ctx.store.getBroadcast(broadcastId);
+  if (!b || b.status === 'done') {
+    return showAdminPanel(ctx, msg);
+  }
+  return runBroadcastChunk(ctx, b);
+}
+
+async function runBroadcastChunk(ctx, b) {
+  // Atomically claim the next chunk: only one caller can advance the offset.
+  const start = b.nextOffset;
+  const next = Math.min(start + LIMITS.broadcastChunk, b.total);
+  const claimed = await ctx.store.claimBroadcastChunk(b.id, start, next);
+  if (!claimed) return; // another tap already claimed this chunk — do nothing
+
+  const ids = await ctx.store.usersPage(start, LIMITS.broadcastChunk);
+  let okCount = 0;
+  let failCount = 0;
+  for (const id of ids) {
     try {
-      await ctx.tg.sendMessage(u.id, text);
-      ok++;
+      await ctx.tg.sendPlainMessage(id, b.text);
+      okCount++;
     } catch {
-      fail++;
+      // 403 = blocked bot, timeouts, transient Telegram errors — count and move on.
+      failCount++;
     }
   }
-  return ctx.send(ctx.userId, t.broadcastDone(ok, fail), kb.adminMenu());
+
+  const done = next >= b.total;
+  const nb = await ctx.store.updateBroadcast(b.id, {
+    sentDelta: okCount,
+    failedDelta: failCount,
+    status: done ? 'done' : 'running',
+  });
+
+  if (done) {
+    return ctx.send(ctx.userId, t.broadcastDone(nb.sent, nb.failed), kb.adminMenu());
+  }
+  return ctx.send(ctx.userId, t.broadcastProgress(nb), kb.broadcastContinueMenu(nb.id));
 }
 
 /** Send a message to every configured admin (used for new-order alerts). */
 export async function notifyAdmins(ctx, text) {
   for (const id of ctx.adminIds) {
     try {
-      await ctx.tg.sendMessage(id, text);
+      await ctx.tg.sendMessage(Number(id), text);
     } catch {
       // admin may not have started the bot yet — ignore
     }
@@ -207,13 +287,4 @@ function advance(ctx, state, step, prompt) {
   return ctx.store
     .setState(ctx.userId, { ...state, step })
     .then(() => ctx.send(ctx.userId, prompt, kb.cancelMenu()));
-}
-
-function parseAmount(input) {
-  const fa = '۰۱۲۳۴۵۶۷۸۹';
-  const s = String(input)
-    .replace(/[۰-۹]/g, (d) => fa.indexOf(d))
-    .replace(/[,\s]/g, '');
-  if (!/^\d+$/.test(s)) return null;
-  return parseInt(s, 10);
 }

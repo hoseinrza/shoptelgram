@@ -60,3 +60,5 @@ out/
 .dev.vars*
 !.dev.vars.example
 .wrangler/
+# KV -> D1 migration output (contains customer data - never commit)
+kv-to-d1-backfill.sql

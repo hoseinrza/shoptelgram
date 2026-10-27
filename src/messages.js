@@ -32,6 +32,19 @@ export const ORDER_STATUS = {
   cancelled: '❌ لغو شد',
 };
 
+/**
+ * The single source of truth for order lifecycle. Both the admin keyboard and
+ * the store's setOrderStatus derive their behavior from this map, so the UI
+ * can never offer a transition the server would reject (and vice versa).
+ */
+export const ORDER_TRANSITIONS = {
+  pending: ['confirmed', 'cancelled'],
+  confirmed: ['shipped', 'cancelled'],
+  shipped: ['done'],
+  done: [],
+  cancelled: [],
+};
+
 export const t = {
   // shared
   shopName: (env) => env.SHOP_NAME || 'فروشگاه',
@@ -60,9 +73,11 @@ export const t = {
     `<b>${esc(p.title)}</b>\n\n` +
     (p.description ? `${esc(p.description)}\n\n` : '') +
     `💵 قیمت: <b>${money(p.price)}</b>\n` +
-    `📦 موجودی: ${p.stock > 0 ? faNum(p.stock) + ' عدد' : 'ناموجود'}`,
+    `📦 موجودی: ${p.stock > 0 ? faNum(p.stock) + ' عدد' : 'ناموجود'}` +
+    (p.active ? '' : '\n🔴 این محصول غیرفعال است'),
   outOfStock: 'این محصول در حال حاضر ناموجود است.',
   added: 'به سبد خرید اضافه شد ✅',
+  productInactiveNote: '🔴 این محصول غیرفعال است و قابل خرید نیست.',
 
   // cart
   emptyCart: 'سبد خرید شما خالی است 🛒\nاز بخش «محصولات» اقلام را اضافه کنید.',
@@ -74,12 +89,19 @@ export const t = {
   btnCheckout: '✅ ثبت سفارش',
   btnClearCart: '🗑 خالی کردن سبد',
   cartCleared: 'سبد خرید خالی شد.',
+  cartUnavailableLine: (title) => `⚠️ ${esc(title)} — این قلم دیگر قابل خرید نیست\n`,
+  cartInvalid:
+    'برخی اقلام سبد خرید شما در دسترس نیستند یا موجودی کافی ندارند.\nسبد را بررسی و اصلاح کنید.',
+  qtyLimit: 'حداکثر تعداد مجاز برای هر قلم سبد ۹۹ عدد است.',
+  cartLineLimit: 'حداکثر ۲۵ قلم مختلف می‌توانید در سبد داشته باشید.',
 
   // checkout flow
   askName: '📝 لطفاً نام و نام خانوادگی گیرنده را بنویسید:',
   askPhone: '📱 شماره تماس را وارد کنید (مثال: ۰۹۱۲۱۲۳۴۵۶۷):',
   askAddress: '🏠 آدرس کامل پستی را با ذکر کد پستی بنویسید:',
   invalidPhone: 'شماره تماس معتبر نیست. یک شماره موبایل ۱۱ رقمی وارد کنید:',
+  textTooLong: 'متن ارسالی طولانی‌تر از حد مجاز است. لطفاً کوتاه‌تر بنویسید:',
+  askTextOnly: 'لطفاً پاسخ را به‌صورت متن پیام بدهید.',
   orderReview: (c, total) =>
     `لطفاً سفارش خود را بررسی و تأیید کنید:\n\n` +
     `👤 ${esc(c.name)}\n📱 ${esc(c.phone)}\n🏠 ${esc(c.address)}\n\n` +
@@ -88,6 +110,7 @@ export const t = {
   orderPlaced: (id) =>
     `سفارش شما با شماره <b>#${faNum(id)}</b> ثبت شد 🎉\n\n` +
     `همکاران ما برای هماهنگی پرداخت و ارسال با شما تماس می‌گیرند. ممنون از خرید شما 🌹`,
+  orderFailed: 'خطا در ثبت سفارش. لطفاً دوباره تلاش کنید.',
   stockChanged: 'موجودی برخی اقلام تغییر کرده است؛ لطفاً سبد خرید را دوباره بررسی کنید.',
 
   // my orders
@@ -129,9 +152,14 @@ export const t = {
   btnEditStock: '📦 ویرایش موجودی',
   btnEditPrice: '💵 ویرایش قیمت',
   productDeleted: 'محصول حذف شد.',
+  productMissing: 'محصول موردنظر پیدا نشد؛ ممکن است حذف شده باشد.',
   askNewStock: 'موجودی جدید را وارد کنید:',
   askNewPrice: 'قیمت جدید را وارد کنید:',
   updated: 'به‌روزرسانی شد ✅',
+  invalidTransition: 'این تغییر وضعیت برای این سفارش مجاز نیست.',
+  pageInfo: (page, pages) => `📄 صفحه ${faNum(page)} از ${faNum(pages)}`,
+  btnPrevPage: '◀️ قبلی',
+  btnNextPage: 'بعدی ▶️',
 
   adminOrdersHeader: '📦 <b>سفارش‌ها</b>\n\n',
   adminNoOrders: 'سفارشی وجود ندارد.',
@@ -161,4 +189,9 @@ export const t = {
   askBroadcast: '📣 متن پیام همگانی را بنویسید. برای همه کاربران ارسال می‌شود:',
   broadcastDone: (ok, fail) =>
     `پیام همگانی ارسال شد ✅\nموفق: ${faNum(ok)} | ناموفق: ${faNum(fail)}`,
+  broadcastProgress: (b) =>
+    `📣 در حال ارسال...\n` +
+    `انجام‌شده: ${faNum(b.sent + b.failed)} از ${faNum(b.total)}\n` +
+    `موفق: ${faNum(b.sent)} | ناموفق: ${faNum(b.failed)}`,
+  btnBroadcastContinue: '📣 ادامه ارسال',
 };

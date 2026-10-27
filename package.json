@@ -1,7 +1,7 @@
 {
   "name": "shoptelgram",
   "version": "1.0.0",
-  "description": "A complete Telegram shop bot running on Cloudflare Workers + KV.",
+  "description": "A complete Telegram shop bot running on Cloudflare Workers + D1.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,9 +9,20 @@
     "start": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "kv:create": "wrangler kv namespace create SHOP"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "types": "wrangler types",
+    "kv:create": "wrangler kv namespace create SHOP",
+    "d1:create": "wrangler d1 create shoptelgram",
+    "d1:migrate:local": "wrangler d1 migrations apply DB --local",
+    "d1:migrate": "wrangler d1 migrations apply DB --remote",
+    "migrate:kv-to-d1": "node scripts/migrate-kv-to-d1.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.98.0"
+    "wrangler": "^4.98.0",
+    "vitest": "^3.2.4",
+    "eslint": "^9.39.2",
+    "@eslint/js": "^9.39.2"
   }
 }

@@ -5,6 +5,7 @@
  *   menu                 main menu
  *   prods                product list / categories
  *   cat:<name>           products in a category
+ *   cat:<name>:<page>    products in a category, page N (page 1 == cat:<name>)
  *   p:<id>               view a product
  *   add:<id>             add product to cart
  *   cart                 view cart
@@ -16,24 +17,31 @@
  *   contact              support
  *   adm                  admin panel
  *   adm:add              add product
- *   adm:prods            manage products
+ *   adm:prods[:<page>]   manage products (page 1 == adm:prods)
  *   adm:p:<id>           manage one product
  *   adm:tg:<id>          toggle active
  *   adm:del:<id>         delete product
  *   adm:stk:<id>         edit stock
  *   adm:prc:<id>         edit price
- *   adm:orders           list orders
+ *   adm:orders[:<page>]  list orders (page 1 == adm:orders)
  *   adm:o:<id>           order detail
  *   adm:os:<id>:<status> set order status
  *   adm:stats            stats
  *   adm:bc               broadcast
+ *   adm:bcgo:<id>        continue a chunked broadcast
  *   x                    cancel current flow
  */
 
-import { t, money, faNum, ORDER_STATUS } from './messages.js';
+import { t, money, faNum, ORDER_STATUS, ORDER_TRANSITIONS } from './messages.js';
 
 const ik = (rows) => ({ inline_keyboard: rows });
 const btn = (text, data) => ({ text, callback_data: data });
+
+/** Keep button labels short so keyboards never hit Telegram's limits. */
+function truncate(s, max = 40) {
+  const str = String(s ?? '');
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
 
 export function mainMenu(isAdmin) {
   const rows = [
@@ -46,23 +54,28 @@ export function mainMenu(isAdmin) {
 }
 
 export function categoriesMenu(categories) {
-  const rows = categories.map((c) => [btn('🗂 ' + c, 'cat:' + c)]);
+  const rows = categories.map((c) => [btn('🗂 ' + truncate(c, 32), 'cat:' + c)]);
   rows.unshift([btn(t.allProducts, 'cat:')]);
   rows.push([btn(t.back, 'menu')]);
   return ik(rows);
 }
 
 export function productListMenu(products, backTo = 'prods') {
-  const rows = products.map((p) => [
-    btn(`${p.title} — ${money(p.price)}`, 'p:' + p.id),
-  ]);
+  const rows = products.map((p) => [productButton(p)]);
   rows.push([btn(t.back, backTo)]);
   return ik(rows);
 }
 
+/** A single "view product" button (used by list builders and pagination). */
+export function productButton(product) {
+  return btn(`${truncate(product.title)} — ${money(product.price)}`, 'p:' + product.id);
+}
+
 export function productMenu(product) {
   const rows = [];
-  if (product.stock > 0) rows.push([btn('➕ افزودن به سبد', 'add:' + product.id)]);
+  if (product.active && product.stock > 0) {
+    rows.push([btn('➕ افزودن به سبد', 'add:' + product.id)]);
+  }
   rows.push([btn(t.btnCart, 'cart'), btn(t.btnProducts, 'prods')]);
   rows.push([btn(t.back, 'menu')]);
   return ik(rows);
@@ -71,7 +84,7 @@ export function productMenu(product) {
 export function cartMenu(lines) {
   const rows = lines.map((l) => [
     btn('➖', 'qdn:' + l.product.id),
-    btn(`${l.product.title} (${faNum(l.qty)})`, 'p:' + l.product.id),
+    btn(`${l.available ? '' : '⚠️ '}${truncate(l.product.title, 30)} (${faNum(l.qty)})`, 'p:' + l.product.id),
     btn('➕', 'qup:' + l.product.id),
   ]);
   rows.push([btn(t.btnCheckout, 'co')]);
@@ -101,10 +114,19 @@ export function adminMenu() {
   ]);
 }
 
-export function adminProductsMenu(products) {
+/** Pagination row (admin lists): prev / next, only where applicable. */
+function pagerRow(prefix, page, pages) {
+  const row = [];
+  if (page > 1) row.push(btn(t.btnPrevPage, `${prefix}:${page - 1}`));
+  if (page < pages) row.push(btn(t.btnNextPage, `${prefix}:${page + 1}`));
+  return row.length ? [row] : [];
+}
+
+export function adminProductsMenu(products, page = 1, pages = 1) {
   const rows = products.map((p) => [
-    btn(`${p.active ? '🟢' : '🔴'} ${p.title} — ${money(p.price)}`, 'adm:p:' + p.id),
+    btn(`${p.active ? '🟢' : '🔴'} ${truncate(p.title)} — ${money(p.price)}`, 'adm:p:' + p.id),
   ]);
+  rows.push(...pagerRow('adm:prods', page, pages));
   rows.push([btn(t.back, 'adm')]);
   return ik(rows);
 }
@@ -118,25 +140,34 @@ export function adminProductMenu(product) {
   ]);
 }
 
-export function adminOrdersMenu(orders) {
-  const rows = orders.slice(0, 20).map((o) => [
+export function adminOrdersMenu(orders, page = 1, pages = 1) {
+  const rows = orders.map((o) => [
     btn(`#${faNum(o.id)} — ${money(o.total)} — ${ORDER_STATUS[o.status]}`, 'adm:o:' + o.id),
   ]);
+  rows.push(...pagerRow('adm:orders', page, pages));
   rows.push([btn(t.back, 'adm')]);
   return ik(rows);
 }
 
 export function adminOrderMenu(order) {
-  const transitions = {
-    pending: [['confirmed', '✅ تأیید'], ['cancelled', '❌ لغو']],
-    confirmed: [['shipped', '🚚 ارسال شد'], ['cancelled', '❌ لغو']],
-    shipped: [['done', '🎉 تحویل شد']],
-    done: [],
-    cancelled: [],
-  };
-  const rows = (transitions[order.status] || []).map(([status, label]) => [
-    btn(label, `adm:os:${order.id}:${status}`),
+  // Buttons are derived from the same transition map the store enforces.
+  const rows = (ORDER_TRANSITIONS[order.status] || []).map((status) => [
+    btn(statusLabel(status), `adm:os:${order.id}:${status}`),
   ]);
   rows.push([btn(t.back, 'adm:orders')]);
   return ik(rows);
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case 'confirmed': return '✅ تأیید';
+    case 'cancelled': return '❌ لغو';
+    case 'shipped': return '🚚 ارسال شد';
+    case 'done': return '🎉 تحویل شد';
+    default: return status;
+  }
+}
+
+export function broadcastContinueMenu(broadcastId) {
+  return ik([[btn(t.btnBroadcastContinue, 'adm:bcgo:' + broadcastId)], [btn(t.back, 'adm')]]);
 }
