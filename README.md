@@ -1,10 +1,14 @@
 <div align="center">
 
+<a name="english"></a>
+
 # 🛍️ shoptelgram
 
-### یک ربات فروشگاهی کامل تلگرام روی ☁️ Cloudflare Workers + D1
+### A complete Telegram shop bot on ☁️ Cloudflare Workers + D1 — with a built-in web admin panel
 
-**بدون سرور • پایگاه‌دادهٔ SQLite روی لبه • تقریباً رایگان**
+**Serverless • Edge SQLite • Atomic checkout • Nearly free**
+
+**English** | [فارسی](#farsi)
 
 <br/>
 
@@ -17,7 +21,6 @@
 <!-- ===== Status shields ===== -->
 ![Tests](https://img.shields.io/badge/tests-115_passing-22C55E?style=flat-square)
 ![Storage](https://img.shields.io/badge/storage-D1_(atomic_transactions)-F38020?style=flat-square&logo=cloudflare&logoColor=white)
-![Language](https://img.shields.io/badge/UI-فارسی-007A33?style=flat-square)
 ![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
 
 </div>
@@ -26,7 +29,338 @@
 
 <div align="center">
 
-> 🚀 **یک فروشگاه آنلاین کامل داخل تلگرام** — مرور محصول، سبد خرید، ثبت سفارش اتمیک و پنل مدیریت؛ همه روی لبهٔ شبکهٔ Cloudflare.
+> 🚀 **A full online shop inside Telegram** — product browsing, cart, atomic checkout and a complete admin experience (bot + web), all at the Cloudflare edge.
+
+</div>
+
+---
+
+## 📊 Project status
+
+| Area | Status | Notes |
+|------|:-----:|-------|
+| 🛒 Shop & cart | ✅ | Server-side stock and price validation |
+| 📦 Atomic checkout | ✅ | Single D1 transaction: no oversell, no duplicate orders |
+| 🔐 Bot admin panel | ✅ | Products, orders, stats, broadcast |
+| 🌐 Web admin panel | ✅ | `/admin` — password + signed cookie, zero dependencies |
+| 🛡️ Security | ✅ | Webhook secret, header auth, input hardening |
+| 🇮🇷 Persian UI | ✅ | Fully Persian, Persian numerals |
+| 🧪 Automated tests | ✅ | 115 tests (Vitest + real SQLite semantics) |
+| 💳 Online payment | 🔜 | Payment is coordinated manually for now |
+
+---
+
+## ✨ Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🧑‍💻 For customers
+- 🛍️ Product browsing with photo, price and stock (paginated)
+- 🗂️ Categories
+- 🛒 Cart with quantity controls + warnings for unavailable items
+- ✅ Checkout (name, phone, address) with atomic confirmation
+- 📦 Order status tracking
+- ☎️ Support section
+
+</td>
+<td width="50%" valign="top">
+
+### 🔐 For admins
+- ➕ Guided product creation with validation
+- 🛠️ Edit/delete, activate/deactivate, paginated lists
+- 📦 Order management with a server-enforced status lifecycle
+- 📊 Shop stats (sales, users, orders)
+- 📣 Chunked, resumable broadcast messages
+- 🔔 Instant new-order alerts
+- 🌐 **Web admin panel** — dashboard, products, orders and broadcast from the browser
+
+</td>
+</tr>
+</table>
+
+> The whole UI is Persian with Persian numerals. 🇮🇷
+
+---
+
+## 🧱 Tech stack
+
+| Layer | Technology |
+|:----:|:------:|
+| ⚡ Runtime | Cloudflare Workers |
+| 💾 Storage | Cloudflare D1 (SQLite + real transactions) |
+| 🤖 Bot | Telegram Bot API (Webhook) |
+| 🌐 Panel | Single-file vanilla JS SPA (no framework, no CDN) |
+| 🧩 Language | JavaScript (ES Modules) |
+| 🧪 Tests | Vitest + `node:sqlite` |
+| 🛠️ Tooling | Wrangler CLI |
+
+---
+
+## 🏗️ Architecture
+
+```
+src/
+├── 🚪 worker.js          Worker entry: routes, webhook, config validation
+├── 🔀 router.js          Telegram update dispatch + callback validation
+├── 🤖 telegram.js        Bot API client (429 handling, timeouts, plain text)
+├── 💾 store.js           D1 data layer (atomic checkout transaction)
+├── 📣 broadcast.js       Shared broadcast engine (bot + web)
+├── ✅ validate.js        Input validation at every trust boundary
+├── 💬 messages.js        Persian copy + order lifecycle map
+├── ⌨️  keyboards.js       Inline keyboards
+├── admin/
+│   ├── 🔑 api.js         Web panel auth (password + signed cookie) + JSON API
+│   └── 🌐 panel.js       Panel UI (single file, dependency-free)
+└── handlers/
+    ├── 🧑 user.js         Customer flows (browse, cart, checkout)
+    └── 🔐 admin.js        Admin flows (products, orders, broadcast)
+migrations/0001_init.sql  D1 schema with CHECK/UNIQUE constraints
+scripts/migrate-kv-to-d1.mjs  One-time KV → D1 data migration
+test/                     115 automated tests
+```
+
+---
+
+## 🔒 Data integrity guarantees (why D1?)
+
+The previous version ran on KV, which is eventually consistent and has no
+transactions — under concurrent load it could produce duplicate ids and
+overselling. Checkout is now **one `db.batch()` in D1 — a single atomic SQL
+transaction:**
+
+- **Never oversells:** stock is validated and decremented inside the same
+  transaction with conditional updates (`stock >= qty`); two simultaneous
+  purchases can never both take the last unit. `CHECK (stock >= 0)` backstops
+  it at the database level.
+- **Never duplicates orders:** every review screen mints a unique
+  `idempotency_key` (`UNIQUE`); mashing the confirm button still creates
+  exactly one order and decrements stock exactly once.
+- **Price snapshot:** each line's title/price is copied into `order_items`;
+  later edits or deletion of the product never alter historical orders.
+- **Locked status lifecycle:** `pending → confirmed → shipped → done` (plus
+  cancel). Illegal transitions are rejected server-side with a
+  compare-and-set UPDATE; the admin keyboard is generated from the same map.
+- **Product deletion:** cascades out of every cart (`ON DELETE CASCADE`) and
+  becomes unpurchasable immediately.
+
+---
+
+## 🚀 Setup (fresh install)
+
+<details open>
+<summary><b>📋 Steps</b></summary>
+
+<br/>
+
+**Prerequisites:** a [Cloudflare](https://dash.cloudflare.com/sign-up) account • [Node.js 22+](https://nodejs.org) • a bot token from [@BotFather](https://t.me/BotFather)
+
+```bash
+# 1️⃣ Clone and install
+git clone https://github.com/hoseinrza/shoptelgram.git
+cd shoptelgram
+npm install
+
+# 2️⃣ Log in to Cloudflare
+npx wrangler login
+
+# 3️⃣ Create the D1 database and paste database_id into wrangler.jsonc
+npx wrangler d1 create shoptelgram
+#   ↓ replace REPLACE_WITH_YOUR_D1_ID with the printed "database_id"
+
+# 4️⃣ Create the tables (schema)
+npm run d1:migrate
+
+# 5️⃣ Set the secrets
+npx wrangler secret put BOT_TOKEN              # BotFather token
+npx wrangler secret put WEBHOOK_SECRET         # random [A-Za-z0-9_-] (e.g. openssl rand -hex 32)
+
+# 6️⃣ Put your numeric Telegram id (from @userinfobot) in ADMIN_IDS (wrangler.jsonc)
+
+# 7️⃣ Deploy
+npm run deploy
+```
+
+**8️⃣ Connect the webhook (once):**
+
+```bash
+curl -X POST "https://<your-worker-url>/setup" -H "x-admin-key: $WEBHOOK_SECRET"
+```
+
+If you see `"ok": true`, you're done — open the bot in Telegram and send **/start**. 🎉
+
+**9️⃣ Web panel (optional):**
+
+```bash
+npx wrangler secret put ADMIN_PANEL_PASSWORD   # a long random password
+npm run deploy                                 # applies the new secret
+```
+
+`https://<your-worker-url>/admin` is now your management dashboard: stats, products, orders and broadcast from the browser.
+
+> ⚠️ Admin endpoints only accept **POST with the `x-admin-key` header** — secrets never appear in URLs (no access logs, no browser history).
+
+</details>
+
+---
+
+## 🔄 Migrating from the previous (KV) version
+
+If your shop already ran on the old KV version and has data (products, orders, users, carts):
+
+```bash
+# 0) Get the KV namespace id
+npx wrangler kv namespace list
+
+# 1) Create the D1 schema (steps 3 and 4 above)
+
+# 2) Move the data (writes kv-to-d1-backfill.sql and applies it to remote D1)
+KV_NAMESPACE_ID=<your-kv-id> node scripts/migrate-kv-to-d1.mjs --apply
+
+# 3) Deploy the new version
+npm run deploy
+```
+
+The script **never deletes KV data**, is idempotent (safe to re-run), and
+migrates old orders with their full line snapshots (title/price at purchase
+time). Once you've verified, remove the `kv_namespaces` block from
+`wrangler.jsonc`.
+
+> `kv-to-d1-backfill.sql` contains customer data (phones, addresses) — it is
+> git-ignored; never commit or share it.
+
+---
+
+## 🧪 Local development & tests
+
+```bash
+cp .dev.vars.example .dev.vars   # fill in the values
+npm run d1:migrate:local         # schema on wrangler dev's local D1
+npm run dev                      # run locally
+
+npm test        # 115 tests (real SQLite — incl. concurrency, idempotency, panel)
+npm run test:watch
+npm run lint    # eslint
+```
+
+---
+
+## ⚙️ Configuration
+
+| Name | Type | Description |
+|------|:----:|-------------|
+| `BOT_TOKEN` | 🔒 secret | Bot token from BotFather |
+| `WEBHOOK_SECRET` | 🔒 secret | Random string `[A-Za-z0-9_-]`; secures the webhook + admin ops |
+| `DB` | 💾 D1 | Database binding (`wrangler.jsonc`) |
+| `ADMIN_IDS` | 📝 var | Comma-separated numeric admin user ids |
+| `ADMIN_PANEL_PASSWORD` | 🔒 secret | Password for the `/admin` web panel (empty = panel disabled) |
+| `SHOP_NAME` | 📝 var | Shop title (optional) |
+| `SUPPORT_CONTACT` | 📝 var | Support handle, e.g. `@support` (optional) |
+
+The Worker landing page (`GET /`) reports configuration problems — **variable
+names only, never values.**
+
+---
+
+## 🔗 Endpoints
+
+| Path | Method | Auth | Purpose |
+|------|:-----:|:-----:|---------|
+| `/` | GET | — | 🟢 Status page |
+| `/webhook` | POST | Telegram secret header | 📨 Incoming updates |
+| `/admin` | GET | — | 🌐 Web admin panel |
+| `/admin/login` | POST | Panel password | 🔑 Login (signed cookie) |
+| `/admin/api/*` | GET/POST/PATCH/DELETE | Session cookie | 📊 Panel API |
+| `/setup` | POST | `x-admin-key` | 🔧 Register webhook + commands |
+| `/webhook-info` | POST | `x-admin-key` | 🔍 Inspect webhook |
+| `/unset` | POST | `x-admin-key` | 🗑️ Remove webhook |
+
+GET requests to admin endpoints are rejected with `405`.
+
+### 🌐 Web admin panel
+
+`/admin` is a single-file, dependency-free Persian/RTL app:
+
+- **Dashboard:** products, orders, users, total sales
+- **Products:** add, inline price/stock editing, activate/deactivate, delete, pagination
+- **Orders:** status filter, full detail, transition buttons (legal transitions only)
+- **Broadcast:** chunked sending (30 recipients per click) with a progress bar and continue button
+
+Security notes: the session is an `HttpOnly + Secure + SameSite=Strict` cookie
+signed with HMAC-SHA256 (key = the panel password) for 12 hours; **every** API
+request is re-verified server-side; cross-origin mutations are rejected;
+login is throttled (per-isolate — a mitigation, not an absolute guarantee).
+The panel is served with a strict CSP and loads no external fonts, scripts or CDNs.
+
+---
+
+## 📋 Usage
+
+🔐 **Admin:** after `/start` the "مدیریت" button appears → add a product → the shop is live. Or manage everything from `/admin`.
+
+🛒 **Customer:** `/start` → «محصولات» → pick → «افزودن به سبد» → «سبد خرید» → «ثبت سفارش».
+
+> 💡 **Payment is manual for now:** no payment gateway is integrated and orders
+> only move through `pending / confirmed / shipped / done / cancelled`. If you
+> later add a gateway, only mark an order paid after the gateway's verified
+> confirmation.
+
+---
+
+## ⚠️ Known limitations
+
+- **Broadcast:** max 30 recipients per invocation (free-plan subrequest limit);
+  continue with the «ادامه ارسال» button in the bot or the web panel. Plain text only (no HTML).
+- **Web panel:** the login throttle is per-isolate (counted separately per
+  datacenter) — the real protection is the strong password and the signed
+  cookie. The "total sales" figure excludes cancelled orders.
+- **D1 free tier:** 500 MB storage, 100k writes/day, 5M reads/day. Fine for a
+  small/mid shop; use the Paid plan for larger scale.
+- **Cart limits:** max 25 distinct lines, max 99 units per line; text lengths
+  (name/address/description) are capped server-side.
+- **Legacy KV:** after migration the old KV data remains untouched (a backup).
+  Removing it is up to you.
+- **D1 read replicas:** if you enable them, reads may briefly lag; sensitive
+  paths (checkout) run as a transaction on the primary and are unaffected.
+
+---
+
+## 🤝 Contributing
+
+```bash
+npm test && npm run lint   # before every PR
+```
+
+CI runs both on every push/PR (Node 22).
+
+---
+
+<div align="center">
+
+## 📝 License
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
+
+**MIT** © hoseinrza
+
+<br/>
+
+If this project helped you, please consider leaving a ⭐!
+
+</div>
+
+---
+
+<a name="farsi"></a>
+
+<div align="center">
+
+# 🛍️ شاپ‌تلگرام — نسخهٔ فارسی
+
+[English](#english) | **فارسی**
+
+### یک ربات فروشگاهی کامل تلگرام روی ☁️ Cloudflare Workers + D1 — همراه با پنل مدیریت وب
 
 </div>
 
@@ -38,7 +372,7 @@
 |------|:-----:|-------|
 | 🛒 فروشگاه و سبد خرید | ✅ | اعتبارسنجی موجودی و قیمت سمت سرور |
 | 📦 ثبت سفارش اتمیک | ✅ | تراکنش D1: بدون اورسل، بدون سفارش تکراری |
-| 🔐 پنل مدیریت | ✅ | محصول، سفارش، آمار، پیام همگانی |
+| 🔐 پنل مدیریت ربات | ✅ | محصول، سفارش، آمار، پیام همگانی |
 | 🌐 پنل وب مدیریت | ✅ | `/admin` — رمز + کوکی امضاشده، بدون وابستگی |
 | 🛡️ امنیت | ✅ | وربروک سیکرت، احراز هدر، ماسک ورودی‌ها |
 | 🇮🇷 رابط کاربری فارسی | ✅ | اعداد و متن‌ها فارسی |
@@ -88,6 +422,7 @@
 | ⚡ اجرا | Cloudflare Workers |
 | 💾 ذخیره‌سازی | Cloudflare D1 (SQLite + تراکنش واقعی) |
 | 🤖 ربات | Telegram Bot API (Webhook) |
+| 🌐 پنل | اپ تک‌فایلی vanilla JS (بدون فریم‌ورک و CDN) |
 | 🧩 زبان | JavaScript (ES Modules) |
 | 🧪 تست | Vitest + `node:sqlite` |
 | 🛠️ ابزار | Wrangler CLI |
@@ -178,7 +513,7 @@ curl -X POST "https://<your-worker-url>/setup" -H "x-admin-key: $WEBHOOK_SECRET"
 
 ```bash
 npx wrangler secret put ADMIN_PANEL_PASSWORD   # یک رمز طولانی و تصادفی
-npm run deploy                                  # اعمال سکرت جدید
+npm run deploy                                 # اعمال سکرت جدید
 ```
 
 حالا `https://<your-worker-url>/admin` داشبورد مدیریت است: آمار، محصولات، سفارش‌ها و پیام همگانی از مرورگر.
@@ -272,7 +607,7 @@ npm run lint    # eslint
 
 ## 📋 نحوهٔ استفاده
 
-🔐 **مدیر:** بعد از `/start` دکمهٔ «مدیریت» ظاهر می‌شود → محصول اضافه کنید → فروشگاه آماده است.
+🔐 **مدیر:** بعد از `/start` دکمهٔ «مدیریت» ظاهر می‌شود → محصول اضافه کنید → فروشگاه آماده است. یا همه‌چیز را از `/admin` مدیریت کنید.
 
 🛒 **مشتری:** `/start` → «محصولات» → انتخاب → «افزودن به سبد» → «سبد خرید» → «ثبت سفارش».
 
@@ -283,11 +618,11 @@ npm run lint    # eslint
 ## ⚠️ محدودیت‌های شناخته‌شده
 
 - **پیام همگانی:** هر بار حداکثر ۳۰ گیرنده (محدودیت subrequest در پلن رایگان Workers)؛ ادامه با دکمهٔ «ادامه ارسال» در ربات یا وب تا پایان. ارسال متن ساده است (بدون HTML).
-- **پنل وب:** محدودکنندهٔ تلاش ورود per-isolate است (در هر دیتاسنتر جدا شمرده می‌شود) — محافظ واقعی، رمز قوی و کوکی امضاشده است. شمارندهٔ بنر «مجموع فروش» سفارش‌های لغوشده را حساب نمی‌کند.
+- **پنل وب:** محدودکنندهٔ تلاش ورود per-isolate است (در هر دیتاسنتر جدا شمرده می‌شود) — محافظ واقعی، رمز قوی و کوکی امضاشده است. شمارندهٔ «مجموع فروش» سفارش‌های لغوشده را حساب نمی‌کند.
 - **محدودیت‌های D1 پلن رایگان:** ۵۰۰ مگابایت حجم، ۱۰۰ هزار نوشتن/روز و ۵ میلیون خواندن/روز. برای فروشگاه کوچک/متوسط کافی است؛ برای مقیاس بالاتر، پلن Paid.
 - **محدودیت‌های سبد:** حداکثر ۲۵ قلم مختلف و ۹۹ عدد برای هر قلم؛ طول متن‌ها (نام/آدرس/توضیحات) سمت سرور محدود می‌شود.
 - **دستهٔ قبلی KV:** پس از مهاجرت، داده‌های قدیمی در KV می‌مانند (پشتیبان). حذفش با شماست.
-- **Replicaهای خواندن D1:** اگر فعالشان کنید، خواندن‌ها ممکن است لحظه‌ای عقب باشند؛ وربروک‌های حساس (checkout) در تراکنش روی primary اجرا می‌شوند و مشکلی ندارند.
+- **Replicaهای خواندن D1:** اگر فعالشان کنید، خواندن‌ها ممکن است لحظه‌ای عقب باشند؛ مسیرهای حساس (checkout) در تراکنش روی primary اجرا می‌شوند و مشکلی ندارند.
 
 ---
 
